@@ -1,15 +1,19 @@
 package termimg
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"image"
 	"io"
+	"log"
 	"math"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"image/color"
 	"image/color/palette"
 	"image/draw"
 	"image/gif"
@@ -27,9 +31,8 @@ func (p *sixelPrinter) PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) erro
 	contentType := http.DetectContentType(buf.Bytes())
 	if contentType == "image/gif" {
 		return p.printGif(w, buf, cfg)
-	} else {
-
 	}
+
 	img, _, err := image.Decode(buf)
 	if err != nil {
 		return err
@@ -47,36 +50,31 @@ func (p *sixelPrinter) printGif(w io.Writer, buf *bytes.Buffer, cfg *Config) err
 	enc := sixel.NewEncoder(w)
 	enc.Width = g.Config.Width
 	enc.Height = g.Config.Height
-
-	_, height := getTermBounds(w)
-	lines := int(math.Ceil(float64(enc.Height) / float64(height)))
-	fmt.Fprint(w, strings.Repeat("\n", lines))
-	fmt.Fprintf(w, "\x1b[%dA", lines)
-	fmt.Fprintf(w, "\x1b[s")
-
-	var back draw.Image
-	if g.BackgroundIndex == 0 {
-		back = image.NewPaletted(g.Image[0].Bounds(), palette.WebSafe)
+	ws, err := getWinSize(w)
+	log.Printf("winsize: %+v\n", ws)
+	if err != nil {
+		return err
 	}
-	// log.Printf("back index: %d, %s\n", g.BackgroundIndex, back)
 
+	if ws.Xpixel > 0 && ws.Ypixel > 0 && ws.Col > 0 && ws.Row > 0 {
+		height := float64(ws.Ypixel) / float64(ws.Row)
+		lines := int(math.Ceil(float64(enc.Height) / height))
+		fmt.Fprint(w, strings.Repeat("\n", lines))
+		fmt.Fprintf(w, "\x1b[%dA", lines)
+		fmt.Fprint(w, "\x1b[s")
+	}
+
+	paletteFactor := append(palette.WebSafe, color.Transparent)
+	bounds := g.Image[0].Bounds()
 	for {
 		t := time.Now()
-		for j := 0; j < len(g.Image); j++ {
-			// log.Printf("back index: %d, %s\n", g.BackgroundIndex, back)
+		for i, frame := range g.Image {
 			fmt.Fprint(w, "\x1b[u")
-			if back != nil {
-				// log.Println("here")
-				draw.Draw(back, back.Bounds(), &image.Uniform{g.Image[j].Palette[g.BackgroundIndex]}, image.Pt(0, 0), draw.Src)
-				draw.Draw(back, back.Bounds(), g.Image[j], image.Pt(0, 0), draw.Src)
-				err = enc.Encode(back)
-			} else {
-				err = enc.Encode(g.Image[j])
-			}
-			if err != nil {
-				return err
-			}
-			span := time.Second * time.Duration(g.Delay[j]) / 100
+			paletteImage := image.NewPaletted(bounds, paletteFactor)
+			draw.Draw(paletteImage, bounds, &image.Uniform{frame.Palette[0]}, image.Pt(0, 0), draw.Src)
+			draw.Draw(paletteImage, bounds, frame, image.Pt(0, 0), draw.Src)
+			enc.Encode(paletteImage)
+			span := time.Second * time.Duration(g.Delay[i]) / 100
 			if time.Since(t) < span {
 				time.Sleep(span)
 			}
@@ -91,4 +89,48 @@ func (p *sixelPrinter) printGif(w io.Writer, buf *bytes.Buffer, cfg *Config) err
 	}
 
 	return nil
+}
+
+func supportsSixelTermAttrs() bool {
+	var resp string
+	_, w, _ := os.Pipe()
+	f := os.Stdout
+	os.Stdout = w
+	out := make([]byte, 1)
+	wr := bufio.NewWriter(f)
+	wr.WriteString("\x1b[c")
+	wr.Flush()
+
+	for {
+		_, err := os.Stdin.Read(out)
+		if err != nil {
+			log.Fatal(err.Error())
+			break
+		}
+
+		resp += string(out[0])
+		if out[0] == 'c' || err == io.EOF {
+			break
+		}
+	}
+
+	return strings.Contains(resp, ";4;") || strings.Contains(resp, ";4c")
+}
+
+func supportsSixel() bool {
+	env := os.Getenv("TERM")
+	prog := os.Getenv("TERM_PROGRAM")
+
+	if prog == "MacTerm" {
+		return true
+	}
+
+	switch env {
+	case "mlterm", "yaft-256color", "foot":
+		return true
+	case "st-256color", "xterm", "xterm-256color":
+		return supportsSixelTermAttrs()
+	}
+
+	return false
 }

@@ -2,19 +2,19 @@ package termimg
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
+	"syscall"
 
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 
-	"github.com/containerd/console"
-	te "github.com/muesli/termenv"
-	"golang.org/x/term"
+	"golang.org/x/sys/unix"
 )
 
 type PrinterType string
@@ -93,7 +93,7 @@ func PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) error {
 	}
 
 	if cfg.AbsoluteOffset {
-		fmt.Fprintf(w, te.CSI+te.CursorPositionSeq, cfg.Y, cfg.X)
+		fmt.Fprintf(w, "\x1b[%d;%dH", cfg.Y, cfg.X)
 	}
 
 	log.Printf("%+v\n", cfg)
@@ -115,28 +115,23 @@ func PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) error {
 	return printer.PrintTo(w, buf, cfg)
 }
 
-func getTermBounds(w io.Writer) (int, int) {
-	// Assume default terminal size
-	cols := 80
-	lines := 24
-
+func getWinSize(w io.Writer) (*unix.Winsize, error) {
 	var outputAsFile *os.File
 	if f, ok := w.(*os.File); ok {
 		outputAsFile = f
 	}
 
 	if outputAsFile != nil {
-		fd := int(outputAsFile.Fd())
-		if term.IsTerminal(fd) {
-			w, h, err := term.GetSize(fd)
-			if err == nil {
-				cols = w
-				lines = h
-			}
+		fd := outputAsFile.Fd()
+		ws, err := unix.IoctlGetWinsize(int(fd), syscall.TIOCGWINSZ)
+		if err != nil {
+			return nil, err
 		}
-	}
 
-	return cols, lines
+		return ws, nil
+	} else {
+		return nil, errors.New("couldn't determine winsize")
+	}
 }
 
 func supportsIterm() bool {
@@ -144,47 +139,6 @@ func supportsIterm() bool {
 }
 
 func supportsKitty() bool {
-	return false
-}
-
-func supportsSixelTermAttrs() bool {
-	resp := make([]byte, 0)
-	out := make([]byte, 1)
-	c := console.Current()
-
-	_, err := c.Write([]byte(te.CSI + "c"))
-	if err != nil {
-		log.Fatal(err.Error())
-		return false
-	}
-
-	for _, err := c.Read(out); err != io.EOF; {
-		resp = append(resp, out[0])
-		if out[0] == 'c' {
-			break
-		}
-	}
-
-	str := string(resp)
-
-	return strings.Contains(str, ";4;") || strings.Contains(str, ";4c")
-}
-
-func supportsSixel() bool {
-	env := os.Getenv("TERM")
-	prog := os.Getenv("TERM_PROGRAM")
-
-	if prog == "MacTerm" {
-		return true
-	}
-
-	switch env {
-	case "mlterm", "yaft-256color", "foot":
-		return true
-	case "st-256color", "xterm", "xterm-256color":
-		return supportsSixelTermAttrs()
-	}
-
 	return false
 }
 
