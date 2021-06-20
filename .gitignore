@@ -1,0 +1,2 @@
+cmd/teimg/*
+!cmd/teimg/main.go
