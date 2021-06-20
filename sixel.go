@@ -27,7 +27,6 @@ type sixelPrinter struct{}
 
 func (p *sixelPrinter) PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) error {
 	enc := sixel.NewEncoder(w)
-
 	contentType := http.DetectContentType(buf.Bytes())
 	if contentType == "image/gif" {
 		return p.printGif(w, buf, cfg)
@@ -71,7 +70,7 @@ func (p *sixelPrinter) printGif(w io.Writer, buf *bytes.Buffer, cfg *Config) err
 		for i, frame := range g.Image {
 			fmt.Fprint(w, "\x1b[u")
 			paletteImage := image.NewPaletted(bounds, paletteFactor)
-			draw.Draw(paletteImage, bounds, &image.Uniform{frame.Palette[0]}, image.Pt(0, 0), draw.Src)
+			draw.Draw(paletteImage, bounds, &image.Uniform{frame.Palette[g.BackgroundIndex]}, image.Pt(0, 0), draw.Src)
 			draw.Draw(paletteImage, bounds, frame, image.Pt(0, 0), draw.Src)
 			enc.Encode(paletteImage)
 			span := time.Second * time.Duration(g.Delay[i]) / 100
@@ -93,23 +92,20 @@ func (p *sixelPrinter) printGif(w io.Writer, buf *bytes.Buffer, cfg *Config) err
 
 func supportsSixelTermAttrs() bool {
 	var resp string
-	_, w, _ := os.Pipe()
-	f := os.Stdout
-	os.Stdout = w
 	out := make([]byte, 1)
-	wr := bufio.NewWriter(f)
+	wr := bufio.NewWriter(os.Stdout)
 	wr.WriteString("\x1b[c")
 	wr.Flush()
 
 	for {
-		_, err := os.Stdin.Read(out)
+		_, err := os.Stdout.Read(out)
 		if err != nil {
 			log.Fatal(err.Error())
 			break
 		}
 
 		resp += string(out[0])
-		if out[0] == 'c' || err == io.EOF {
+		if out[0] == 'c' || out[0] == 0 || err == io.EOF {
 			break
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"os"
 )
 
 type itermPrinter struct{}
@@ -45,4 +46,8 @@ func (p *itermPrinter) PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) erro
 	_, err := fmt.Fprintln(w, out)
 
 	return err
+}
+
+func supportsIterm() bool {
+	return os.Getenv("ITERM_SESSION_ID") != ""
 }

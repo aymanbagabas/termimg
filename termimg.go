@@ -26,6 +26,12 @@ const (
 	Blocks PrinterType = "blocks"
 )
 
+var (
+	ErrPrinterNotSupported = errors.New("printer not supported")
+	ErrUnknownPrinter      = errors.New("unknown printer")
+	ErrUnknownWinSize      = errors.New("unknown window size")
+)
+
 type Config struct {
 	X                   uint
 	Y                   int
@@ -55,9 +61,9 @@ func NewConfig() *Config {
 		Height:              nil,
 		AbsoluteOffset:      false,
 		PreserveAspectRatio: true,
-		UseIterm:            true,
-		UseKitty:            true,
-		UseSixel:            true,
+		UseIterm:            false,
+		UseKitty:            false,
+		UseSixel:            false,
 		UseBlocks:           true,
 	}
 }
@@ -107,9 +113,11 @@ func PrintTo(w io.Writer, buf *bytes.Buffer, cfg *Config) error {
 	} else if cfg.UseSixel && supportsSixel() && !isTmux() {
 		log.Println("printer: sixel")
 		printer = &sixelPrinter{}
-	} else {
+	} else if cfg.UseBlocks {
 		log.Println("printer: blocks")
 		printer = &blocksPrinter{}
+	} else {
+		return ErrPrinterNotSupported
 	}
 
 	return printer.PrintTo(w, buf, cfg)
@@ -130,16 +138,8 @@ func getWinSize(w io.Writer) (*unix.Winsize, error) {
 
 		return ws, nil
 	} else {
-		return nil, errors.New("couldn't determine winsize")
+		return nil, ErrUnknownWinSize
 	}
-}
-
-func supportsIterm() bool {
-	return os.Getenv("ITERM_SESSION_ID") != ""
-}
-
-func supportsKitty() bool {
-	return false
 }
 
 func isTmux() bool {

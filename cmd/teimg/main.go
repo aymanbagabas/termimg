@@ -1,13 +1,12 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
-	"github.com/aymanbagabas/termimg"
+	ti "github.com/aymanbagabas/termimg"
 	"github.com/spf13/cobra"
 )
 
@@ -28,31 +27,23 @@ var (
 		Args:  cobra.ExactArgs(1),
 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := termimg.NewConfig()
+			cfg := ti.NewConfig()
 			cfg.AbsoluteOffset = Absolute
 			cfg.PreserveAspectRatio = PreserveAspectRatio
 			cfg.X = uint(X)
 			cfg.Y = Y
 
-			if Backend != "" {
-				backend := strings.ToLower(Backend)
-				cfg.UseIterm = false
-				cfg.UseKitty = false
-				cfg.UseSixel = false
-				cfg.UseBlocks = false
+			backend := strings.ToLower(Backend)
+			cfg.UseIterm = backend == "" || backend == ti.Iterm.String()
+			cfg.UseKitty = backend == "" || backend == ti.Kitty.String()
+			cfg.UseSixel = backend == "" || backend == ti.Sixel.String()
+			cfg.UseBlocks = backend == "" || backend == ti.Blocks.String()
 
-				switch backend {
-				case "iterm":
-					cfg.UseIterm = true
-				case "kitty":
-					cfg.UseKitty = true
-				case "sixel":
-					cfg.UseSixel = true
-				case "blocks":
-					cfg.UseBlocks = true
-				default:
-					return errors.New("unknown backend")
-				}
+			if backend != "" && (backend != ti.Iterm.String() &&
+				backend != ti.Kitty.String() &&
+				backend != ti.Sixel.String() &&
+				backend != ti.Blocks.String()) {
+				return ti.ErrUnknownPrinter
 			}
 
 			if Width > 0 {
@@ -62,7 +53,7 @@ var (
 				cfg.Height = &Height
 			}
 
-			return termimg.PrintFromFile(args[0], cfg)
+			return ti.PrintFromFile(args[0], cfg)
 		},
 	}
 )
